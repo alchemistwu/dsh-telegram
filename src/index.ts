@@ -25,6 +25,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Transport } from './transport.ts'
 import { Bridge } from './bridge.ts'
+import { QuestionAnswerer } from './questions.ts'
 import { createSession, isConversationSession } from './sessions.ts'
 
 export interface Config {
@@ -80,6 +81,16 @@ export function apply(ctx: any, config: Config) {
   })
   state.transport = transport
   state.bridge = bridge
+
+  // --- ask_user_question answerer: without this, an agent asking a
+  // question on a telegram-bound session blocks forever (the only other
+  // answerer lives in the web UI nobody is watching) ---
+  const answerer = new QuestionAnswerer(
+    transport,
+    (agentId) => bridge.chatFor(agentId),
+    (msg, ...rest) => logger.info(msg, ...rest),
+  )
+  const detachQuestions = ctx.on('user-questions/request', answerer.tryAnswer)
 
   // --- commands ---
   async function ensureSession(chatId: number, titleHint?: string): Promise<string> {
@@ -164,6 +175,7 @@ export function apply(ctx: any, config: Config) {
   const detachEvents = bridge.attachEvents(ctx)
   ctx.on('dispose', () => {
     detachEvents()
+    detachQuestions()
     transport.stop()
   })
 
@@ -173,6 +185,8 @@ export function apply(ctx: any, config: Config) {
       return
     }
     try {
+      // A pending ask_user_question consumes this message as its answer.
+      if (answerer.feed(chatId, text)) return
       if (text.startsWith('/') && await handleCommand(chatId, text)) return
       await ensureSession(chatId, text)
       await bridge.deliver(chatId, text)
