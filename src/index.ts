@@ -35,17 +35,32 @@ export interface Config {
   model?: { provider?: string; model?: string }
 }
 
+/**
+ * Service dependencies consumed by the cordis loader: without declaring
+ * these, `ctx.agents` throws `cannot get property "agents" without inject`
+ * inside apply (2026-08-31 boot failure). Only `agents` is required; the
+ * optional services (agentPresets/sessionTitle/workspaceRegistry/sessions)
+ * are read through ctx.get(), which never consults inject.
+ */
+export const inject = ['agents']
+
+/** Cordis function-plugin name. */
+export const name = 'telegram'
+
 interface PluginState {
   transport?: Transport
   bridge?: Bridge
 }
 
-export function apply(ctx: any, config: Config) {
+export function apply(ctx: any, config?: Config) {
   const logger = ctx.logger('telegram')
+  // cordis calls apply(ctx, undefined) when the patch row carries no config —
+  // cfg must never be dereferenced before this line (2026-08-31 boot failure).
+  const cfg = config ?? {}
   const state: PluginState = {}
 
   // --- token resolution: config > env > .telegram-token file ---
-  const token = config.token
+  const token = cfg.token
     ?? process.env.TELEGRAM_BOT_TOKEN
     ?? readTokenFile()
   if (!token) {
@@ -53,8 +68,8 @@ export function apply(ctx: any, config: Config) {
     return
   }
 
-  const allowed = new Set(config.allowedChatIds ?? [])
-  const workspacePath = config.workspacePath ?? process.cwd()
+  const allowed = new Set(cfg.allowedChatIds ?? [])
+  const workspacePath = cfg.workspacePath ?? process.cwd()
 
   // --- durable offset store (profile state dir) ---
   const stateDir = join(process.env.HOME ?? '.', '.dsh', 'profiles', 'desktop', 'state')
