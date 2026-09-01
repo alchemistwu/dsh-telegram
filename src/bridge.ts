@@ -87,7 +87,21 @@ export class Bridge {
     if (!agentId) throw new Error('no session bound')
     const agent = this.deps.agents?.get(agentId)
     if (!agent) throw new Error('bound session is not live')
-    await agent.prompt(text)
+    // Agent-loop API (agent.prompt does not exist): followup(message) is
+    // send(message, 'next-turn', wakeup=true) — a normal user turn.
+    const message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: { kind: 'user' },
+    }
+    if (typeof agent.followup === 'function') {
+      agent.followup(message)
+    } else if (typeof agent.send === 'function') {
+      agent.send(message, 'next-turn', true)
+    } else {
+      throw new Error('agent exposes neither followup() nor send() — unsupported agent implementation')
+    }
   }
 }
 
