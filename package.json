@@ -1,0 +1,21 @@
+{
+  "name": "dsh-telegram",
+  "version": "0.1.0",
+  "description": "Minimal, robust Telegram bridge for DeepSeek Harness \u2014 chat with your agents from your phone.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "node --check src/index.ts && node --check src/transport.ts && node --check src/bridge.ts && node --check src/sessions.ts"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "license": "MIT"
+}

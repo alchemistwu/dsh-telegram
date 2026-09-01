@@ -1,0 +1,5 @@
+# Bundle patch: self-registers on `dsh plugin add`. Zero required config
+# beyond the bot token (see README).
+- insert:
+    - id: telegram
+      name: dsh-telegram
