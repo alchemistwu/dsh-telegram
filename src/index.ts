@@ -143,17 +143,23 @@ export function apply(ctx: any, config?: Config) {
         return true
       }
       case '/sessions': {
+        // Verified shapes (dsh-alpha2): sessions.list() → Session[] with
+        // .header.{cwd,origin,parentSession}; titles live in sessionTitle
+        // service: sessionTitle.get(session)?.title. Session has NO .title.
         const svc = services()
         const list = svc.sessions?.list?.() ?? []
+        const titles = svc.sessionTitle
         const rows = list
           .filter((s: any) => isConversationSession({ origin: s.header?.origin, parentSession: s.header?.parentSession }))
           .slice(0, 15)
           .map((s: any) => {
             const bound = bridge.agentFor(chatId) === String(s.id) ? '▸' : '•'
-            const title = s.title ?? s.header?.cwd?.split('/').pop() ?? String(s.id).slice(0, 18)
+            const title = titles?.get?.(s)?.title
+              ?? s.header?.cwd?.split('/').pop()
+              ?? String(s.id).slice(0, 18)
             return `${bound} ${title}  (${String(s.id).slice(0, 13)}…)`
           })
-        await transport.send(chatId, rows.length ? rows.join('\n') : '(no sessions)')
+        await transport.send(chatId, rows.length ? rows.join('\n') : '(no live sessions)')
         return true
       }
       case '/use': {
@@ -177,7 +183,9 @@ export function apply(ctx: any, config?: Config) {
       case '/stop': {
         const agentId = bridge.agentFor(chatId)
         const agent = agentId ? ctx.agents?.get(agentId) : undefined
-        try { await agent?.abort?.() } catch { /* best effort */ }
+        // Verified (agent-loop agent.ts:143): the cancel API is
+        // agent.cancel(cause) — there is no agent.abort.
+        try { agent?.cancel?.({ kind: 'user' }) } catch { /* best effort */ }
         await transport.send(chatId, '⏹ aborted')
         return true
       }

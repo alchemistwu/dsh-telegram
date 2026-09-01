@@ -62,7 +62,9 @@ export class Bridge {
         void this.deps.transport.sendTyping(chatId)
         return
       }
-      if (type === 'tool/started' && this.running.has(agentId)) {
+      // Verified event names (session/types.ts): 'tool/call' carries
+      // { turn, step, callId, name, arguments } — 'tool/started' never existed.
+      if (type === 'tool/call' && this.running.has(agentId)) {
         const name = event.data?.name ?? 'tool'
         void this.deps.transport.send(chatId, `🔧 ${name}`).catch(() => {})
         return

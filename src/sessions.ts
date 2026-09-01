@@ -74,11 +74,13 @@ export async function createSession(
   })
   const agentId = String(handle.agent.id)
 
-  // Rule 3: title immediately.
+  // Rule 3: title immediately. rename() requires the exact live Session
+  // (it identity-checks against ctx.sessions); agent.session is that object
+  // (verified: ReactLoopAgent constructor receives the store's Session).
   const title = autoTitle(options.titleHint)
   if (svc.sessionTitle) {
     try {
-      const session = svc.sessions?.get?.(sessionId) ?? handle.agent
+      const session = handle.agent.session ?? svc.sessions?.get?.(sessionId)
       svc.sessionTitle.rename(session, title)
     } catch (err) {
       svc.logger('auto-title failed (non-fatal):', (err as Error).message)
