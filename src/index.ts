@@ -201,7 +201,7 @@ export function apply(ctx: any, config: Config) {
 
 function readTokenFile(): string | undefined {
   try {
-    const p = join(__dirname, '..', '.telegram-token')
+    const p = join(new URL('..', import.meta.url).pathname, '.telegram-token')
     if (existsSync(p)) return readFileSync(p, 'utf8').trim()
   } catch { /* fall through */ }
   return undefined
