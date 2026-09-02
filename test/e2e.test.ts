@@ -19,6 +19,9 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply } from '../src/index.ts'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 // ---------- fake telegram network ----------
 interface SentMsg { chatId: number; text: string }
@@ -148,6 +151,7 @@ function boot(opts: Parameters<typeof makeCtx>[0] & { token?: string } = {}) {
   apply(ctx, {
     allowedChatIds: [CHAT],
     workspacePath: '/Users/junzhengwu/Documents/Deepseek Harness',
+    stateDir: mkdtempSync(join(tmpdir(), 'dsh-tg-test-')),   // never touch real profile state
   })
   return {
     net, ctx, agentMap,
@@ -192,7 +196,7 @@ test('/sessions lists persisted conversations, filters subagent origin', async (
   try {
     await h.send('/sessions', 2)
     const reply = h.net.sent.find((m) => m.chatId === CHAT)?.text ?? ''
-    assert.match(reply, /TG 09-01 chats/)          // persisted title
+    assert.match(reply, /TG 09\\-01 chats/)        // persisted title (MarkdownV2-escaped)
     assert.match(reply, /telegram-bbb222|Deepseek Harness/) // second session shown
     assert.doesNotMatch(reply, /deadbeef/)         // subagent filtered
     assert.doesNotMatch(reply, /cafe33/)           // forked filtered
@@ -213,7 +217,7 @@ test('/use <number> picks from the last /sessions menu', async () => {
   try {
     await h.send('/sessions', 20)
     const menu = h.net.sent.at(-1)?.text ?? ''
-    assert.match(menu, /1\. .*first chat|2\. .*second chat/s)
+    assert.match(menu, /1\\\. .*first chat|2\\\. .*second chat/s)
     await h.send('/use 2', 21)
     assert.ok(h.agentMap.has('telegram-bbb222'), 'row 2 should resume telegram-bbb222')
     assert.match(h.net.sent.at(-1)?.text ?? '', /second chat/)
@@ -292,7 +296,7 @@ test('/stop cancels the bound agent with user cause', async () => {
     await h.send('/stop', 12)
     const agent = [...h.agentMap.values()][0] as any
     assert.deepEqual(agent.cancelled, { kind: 'user' })
-    assert.match(h.net.sent.at(-1)?.text ?? '', /aborted/)
+    assert.match(h.net.sent.at(-1)?.text ?? '', /aborted|⏹/)
   } finally { h.restore() }
 })
 

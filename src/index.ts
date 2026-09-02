@@ -33,6 +33,8 @@ export interface Config {
   allowedChatIds?: number[]
   workspacePath?: string
   model?: { provider?: string; model?: string }
+  /** Override the durable state directory (tests; defaults to the desktop profile's). */
+  stateDir?: string
 }
 
 /**
@@ -79,8 +81,9 @@ export function apply(ctx: any, config?: Config) {
     ?? process.cwd()
 
   // --- durable offset store (profile state dir) ---
-  const stateDir = join(process.env.HOME ?? '.', '.dsh', 'profiles', 'desktop', 'state')
+  const stateDir = cfg.stateDir ?? join(process.env.HOME ?? '.', '.dsh', 'profiles', 'desktop', 'state')
   const offsetFile = join(stateDir, 'telegram-offset.json')
+  const bindingsFile = join(stateDir, 'telegram-bindings.json')
 
   const transport = new Transport({
     token,
@@ -100,6 +103,15 @@ export function apply(ctx: any, config?: Config) {
     transport,
     agents: ctx.agents,
     logger: (msg, ...rest) => logger.warn(msg, ...rest),
+    readBindings: () => {
+      try { return JSON.parse(readFileSync(bindingsFile, 'utf8')).bindings } catch { return undefined }
+    },
+    writeBindings: (bindings) => {
+      try {
+        mkdirSync(stateDir, { recursive: true })
+        writeFileSync(bindingsFile, JSON.stringify({ bindings }))
+      } catch (err) { logger.warn('bindings persist failed:', (err as Error).message) }
+    },
   })
   state.transport = transport
   state.bridge = bridge
@@ -119,11 +131,43 @@ export function apply(ctx: any, config?: Config) {
   const detachQuestions = ctx.on('user-questions/request', answerer.tryAnswer, { global: true })
 
   // --- commands ---
+  /**
+   * Resume dance shared by /use and ensureSession — single source of truth
+   * (verified against agent-presets source: defaultId property, mount(ctx, id)).
+   */
+  async function resumeAgent(id: string): Promise<void> {
+    await ctx.agents.resume({
+      resumeSessionId: id,
+      agentOptions: cfg.model ? { model: cfg.model } : undefined,
+      setup: async (agentCtx: any, commit: any) => {
+        const presets = ctx.get?.('agentPresets')
+        if (presets?.mount) {
+          const presetId = presets.defaultId ?? 'standard'
+          await presets.resolve?.(presetId)
+          await presets.mount(agentCtx, presetId)
+        }
+        commit?.()
+      },
+    })
+  }
+
   async function ensureSession(chatId: number, titleHint?: string): Promise<string> {
     const existing = bridge.agentFor(chatId)
-    if (existing && ctx.agents?.get(existing)) return existing
+    if (existing) {
+      if (ctx.agents?.get(existing)) return existing
+      // Binding survived a restart (persisted) but the agent didn't:
+      // RESUME the bound session rather than silently creating a new one
+      // (2026-09-02: user replied to the stream after a self-restart and
+      // landed in a fresh session).
+      try {
+        await resumeAgent(existing)
+        return existing
+      } catch (err) {
+        logger.warn(`bound session ${existing.slice(0, 18)}… not resumable (${(err as Error).message.slice(0, 80)}) — creating new`)
+      }
+    }
     const { agentId } = await createSession(services(), workspacePath, {
-      model: config.model,
+      model: cfg.model,
       titleHint,
     })
     bridge.bind(chatId, agentId)

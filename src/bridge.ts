@@ -16,6 +16,14 @@ export interface BridgeDeps {
   transport: Transport
   agents: any
   logger: (msg: string, ...rest: unknown[]) => void
+  /**
+   * Optional durable binding store (chatId → agentId). Without persistence,
+   * a Desktop restart wipes bindings and the next message silently creates
+   * a NEW session instead of continuing the bound one (2026-09-02 incident
+   * after a self-restart).
+   */
+  readBindings?: () => Record<string, string> | undefined
+  writeBindings?: (bindings: Record<string, string>) => void
 }
 
 export class Bridge {
@@ -29,6 +37,24 @@ export class Bridge {
 
   constructor(deps: BridgeDeps) {
     this.deps = deps
+    // Restore persisted bindings (best-effort; stale agent ids are pruned
+    // lazily by deliver()'s "not live" check and ensureSession's re-bind).
+    try {
+      const saved = deps.readBindings?.() ?? {}
+      for (const [chat, agent] of Object.entries(saved)) {
+        const chatId = Number(chat)
+        if (Number.isFinite(chatId) && agent) {
+          this.bindings.set(chatId, agent)
+          this.agentToChat.set(agent, chatId)
+        }
+      }
+    } catch { /* corrupted store → start fresh */ }
+  }
+
+  private persist(): void {
+    try {
+      this.deps.writeBindings?.(Object.fromEntries(this.bindings))
+    } catch { /* non-fatal */ }
   }
 
   bind(chatId: number, agentId: string): void {
@@ -36,6 +62,7 @@ export class Bridge {
     if (previous) this.agentToChat.delete(previous)
     this.bindings.set(chatId, agentId)
     this.agentToChat.set(agentId, chatId)
+    this.persist()
   }
 
   agentFor(chatId: number): string | undefined {
@@ -97,6 +124,7 @@ export class Bridge {
       content: [{ type: 'text', text }],
       source: { kind: 'user' },
     }
+    this.deps.logger(`deliver → ${agentId.slice(0, 18)}… status=${agent.status ?? '?'} (followup=${typeof agent.followup})`)
     if (typeof agent.followup === 'function') {
       agent.followup(message)
     } else if (typeof agent.send === 'function') {
@@ -104,6 +132,7 @@ export class Bridge {
     } else {
       throw new Error('agent exposes neither followup() nor send() — unsupported agent implementation')
     }
+    this.deps.logger(`delivered; status now=${agent.status ?? '?'}`)
   }
 }
 
