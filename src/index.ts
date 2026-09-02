@@ -189,7 +189,9 @@ export function apply(ctx: any, config?: Config) {
         // (verified: agents.resume(ownerCtx, { resumeSessionId, agentOptions,
         // setup }) — preset must mount in setup, same as create).
         if (!ctx.agents?.get?.(id)) {
-          await ctx.agents.resume(ctx, {
+          // Verified: registry resume(options) — one arg; ownerCtx is bound
+          // internally (agent/src/index.ts:416).
+          await ctx.agents.resume({
             resumeSessionId: id,
             agentOptions: cfg.model ? { model: cfg.model } : undefined,
             setup: (agentCtx: any, commit: any) => {
