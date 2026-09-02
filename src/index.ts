@@ -126,6 +126,7 @@ export function apply(ctx: any, config?: Config) {
       sessionTitle: ctx.get?.('sessionTitle'),
       workspaceRegistry: ctx.get?.('workspaceRegistry'),
       sessions: ctx.get?.('sessions'),
+      sessionPersistence: ctx.get?.('sessionPersistence'),
       logger: (msg: string, ...rest: unknown[]) => logger.warn(msg, ...rest),
     }
   }
