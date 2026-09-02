@@ -199,6 +199,48 @@ test('/sessions lists persisted conversations, filters subagent origin', async (
   } finally { h.restore() }
 })
 
+test('/use <number> picks from the last /sessions menu', async () => {
+  const h = boot({
+    persistedHeaders: [
+      { id: 'telegram-aaa111', origin: undefined, parentSession: undefined, cwd: '/x' },
+      { id: 'telegram-bbb222', origin: undefined, parentSession: undefined, cwd: '/x' },
+    ],
+    inspections: {
+      'telegram-aaa111': { meta: {}, events: [{ type: 'session/title', data: { title: 'first chat' } }] },
+      'telegram-bbb222': { meta: {}, events: [{ type: 'session/title', data: { title: 'second chat' } }] },
+    },
+  })
+  try {
+    await h.send('/sessions', 20)
+    const menu = h.net.sent.at(-1)?.text ?? ''
+    assert.match(menu, /1\. .*first chat|2\. .*second chat/s)
+    await h.send('/use 2', 21)
+    assert.ok(h.agentMap.has('telegram-bbb222'), 'row 2 should resume telegram-bbb222')
+    assert.match(h.net.sent.at(-1)?.text ?? '', /second chat/)
+    await h.send('hello again', 22)
+    assert.equal(h.agentMap.get('telegram-bbb222')?.lastMessage?.content?.[0]?.text, 'hello again')
+  } finally { h.restore() }
+})
+
+test('/use <title word> matches persisted titles', async () => {
+  const h = boot({
+    persistedHeaders: [
+      { id: 'telegram-aaa111', origin: undefined, parentSession: undefined, cwd: '/x' },
+      { id: 'telegram-bbb222', origin: undefined, parentSession: undefined, cwd: '/x' },
+    ],
+    inspections: {
+      'telegram-aaa111': { meta: {}, events: [{ type: 'session/title', data: { title: 'TG deploy talk' } }] },
+      'telegram-bbb222': { meta: {}, events: [{ type: 'session/title', data: { title: 'TG music picks' } }] },
+    },
+  })
+  try {
+    await h.send('/use music', 23)
+    assert.ok(h.agentMap.has('telegram-bbb222'))
+    await h.send('/use nonexistentword', 24)
+    assert.match(h.net.sent.at(-1)?.text ?? '', /no session matches/)
+  } finally { h.restore() }
+})
+
 test('/use resumes an offline persisted session and binds it', async () => {
   const h = boot({
     persistedHeaders: [
@@ -209,7 +251,7 @@ test('/use resumes an offline persisted session and binds it', async () => {
     await h.send('/use telegram-aaa111', 3)
     assert.ok(h.agentMap.has('telegram-aaa111-old'), 'session should be resumed into agents')
     const reply = h.net.sent.at(-1)?.text ?? ''
-    assert.match(reply, /Using session/)
+    assert.match(reply, /🔀/)
     // subsequent plain message goes to the resumed agent
     await h.send('continuing', 4)
     assert.equal(h.agentMap.get('telegram-aaa111-old')?.lastMessage?.content?.[0]?.text, 'continuing')

@@ -58,6 +58,8 @@ export function apply(ctx: any, config?: Config) {
   // cfg must never be dereferenced before this line (2026-08-31 boot failure).
   const cfg = config ?? {}
   const state: PluginState = {}
+  // chatId → session ids of the last /sessions menu, for "/use <number>".
+  const sessionMenu = new Map<number, string[]>()
 
   // --- token resolution: config > env > .telegram-token file ---
   const token = cfg.token
@@ -148,18 +150,20 @@ export function apply(ctx: any, config?: Config) {
         // only LIVE sessions (in-memory store) — telegram sessions from
         // previous boots don't appear until resumed. The complete durable
         // source is sessionPersistence.list() → SessionHeader[].
-        // Titles of NON-live sessions can't come from sessionTitle.get()
-        // (folds the live log), so read title events from persistence
-        // inspection. Live sessions still prefer sessionTitle.
         const svc = services()
         const headers = await svc.sessionPersistence?.list?.() ?? []
         const live = svc.sessions
         const titles = svc.sessionTitle
+        // Numbered for phone typing: /use 2 selects row 2 of this listing.
+        const convos: any[] = headers.filter((h: any) =>
+          isConversationSession({ origin: h.origin, parentSession: h.parentSession }))
+        sessionMenu.set(chatId, convos.slice(0, 15).map((h: any) => String(h.id)))
         const rows: string[] = []
-        for (const h of headers) {
-          if (!isConversationSession({ origin: h.origin, parentSession: h.parentSession })) continue
+        let n = 0
+        for (const h of convos) {
+          n++
           const id = String(h.id)
-          const bound = bridge.agentFor(chatId) === id ? '▸' : '•'
+          const bound = bridge.agentFor(chatId) === id ? '▸' : `${n}.`
           let title: string | undefined
           const liveSession = live?.get?.(h.id)
           if (liveSession) {
@@ -168,29 +172,45 @@ export function apply(ctx: any, config?: Config) {
             title = await persistedTitle(svc, h.id)
           }
           const fallback = h.cwd?.split('/').pop() ?? id.slice(0, 18)
-          rows.push(`${bound} ${title ?? fallback}  (${id.slice(0, 13)}…)`)
+          rows.push(`${bound} ${title ?? fallback}`)
           if (rows.length >= 15) break
         }
-        await transport.send(chatId, rows.length ? rows.join('\n') : '(no sessions)')
+        await transport.send(chatId, rows.length
+          ? rows.join('\n') + '\n\n/use <编号或标题词> 切换'
+          : '(no sessions)')
         return true
       }
       case '/use': {
-        const prefix = rest[0]
-        if (!prefix) { await transport.send(chatId, 'usage: /use <session-id-prefix>'); return true }
-        // Match against persisted history, not only live sessions.
+        const query = rest.join(' ').trim()
+        if (!query) { await transport.send(chatId, 'usage: /use <编号|标题词|id前缀>（编号见 /sessions）'); return true }
         const svc = services()
-        const headers = await svc.sessionPersistence?.list?.() ?? []
-        const match = headers.find((h: any) =>
-          String(h.id).startsWith(prefix) &&
-          isConversationSession({ origin: h.origin, parentSession: h.parentSession }))
-        if (!match) { await transport.send(chatId, `no session matches "${prefix}"`); return true }
-        const id = String(match.id)
+        // 1) number from the last /sessions menu shown to this chat
+        let id: string | undefined
+        const menu = sessionMenu.get(chatId)
+        if (/^\d+$/.test(query) && menu) {
+          id = menu[Number(query) - 1]
+        }
+        // 2) id prefix or 3) title word, against persisted conversations
+        if (!id) {
+          const headers = await svc.sessionPersistence?.list?.() ?? []
+          const convos = headers.filter((h: any) =>
+            isConversationSession({ origin: h.origin, parentSession: h.parentSession }))
+          const byPrefix = convos.find((h: any) => String(h.id).startsWith(query))
+          if (byPrefix) {
+            id = String(byPrefix.id)
+          } else {
+            const q = query.toLowerCase()
+            for (const h of convos) {
+              const title = await persistedTitle(svc, h.id) ?? ''
+              if (title.toLowerCase().includes(q)) { id = String(h.id); break }
+            }
+          }
+        }
+        if (!id) { await transport.send(chatId, `no session matches "${query}"`); return true }
         // Live already? bind directly. Otherwise resume through the registry
-        // (verified: agents.resume(ownerCtx, { resumeSessionId, agentOptions,
-        // setup }) — preset must mount in setup, same as create).
+        // (verified: registry resume(options) — one arg; ownerCtx is bound
+        // internally. Preset must mount in setup, same as create).
         if (!ctx.agents?.get?.(id)) {
-          // Verified: registry resume(options) — one arg; ownerCtx is bound
-          // internally (agent/src/index.ts:416).
           await ctx.agents.resume({
             resumeSessionId: id,
             agentOptions: cfg.model ? { model: cfg.model } : undefined,
@@ -204,7 +224,8 @@ export function apply(ctx: any, config?: Config) {
           })
         }
         bridge.bind(chatId, id)
-        await transport.send(chatId, `🔀 Using session ${id.slice(0, 18)}…`)
+        const title = await persistedTitle(svc, id)
+        await transport.send(chatId, `🔀 ${title ?? id.slice(0, 18)}`)
         return true
       }
       case '/status': {
