@@ -71,7 +71,12 @@ export function apply(ctx: any, config?: Config) {
   }
 
   const allowed = new Set(cfg.allowedChatIds ?? [])
-  const workspacePath = cfg.workspacePath ?? process.cwd()
+  // process.cwd() in Desktop is the HOME dir, which never matches a
+  // registered workspace (probe finding 2026-09-01); fall back to the
+  // first registered workspace instead.
+  const workspacePath = cfg.workspacePath
+    ?? ctx.get?.('workspaceRegistry')?.list?.()?.[0]?.path
+    ?? process.cwd()
 
   // --- durable offset store (profile state dir) ---
   const stateDir = join(process.env.HOME ?? '.', '.dsh', 'profiles', 'desktop', 'state')

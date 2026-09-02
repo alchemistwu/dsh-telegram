@@ -130,12 +130,18 @@ export function apply(ctx: any) {
 
     // === 7. waterfall with {global:true} receives dispatches carrying a thisArg ===
     await check('scoped-waterfall-global-reach', async () => {
-      let fired = false
-      const detach = ctx.on('probe/scoped-test', () => { fired = true }, { global: true })
-      await ctx.events.waterfall({}, 'probe/scoped-test', {}, () => Promise.resolve(null)).catch(() => {})
-      detach()
-      if (!fired) throw new Error('global hook did not receive thisArg dispatch')
-      return true
+      // cordis waterfall(thisArg, name, ...args, inner): each hook must call
+      // next() to continue the chain; the return value is the first hook's.
+      let globalFired = false
+      let plainFired = false
+      const d1 = ctx.on('probe/scoped-test', (req: any, next: any) => { globalFired = true; return next() }, { global: true })
+      const d2 = ctx.on('probe/scoped-test', (req: any, next: any) => { plainFired = true; return next() })
+      await ctx.events.waterfall({}, 'probe/scoped-test', {}, () => Promise.resolve('inner'))
+      d1(); d2()
+      if (!globalFired) throw new Error('global hook missed thisArg dispatch')
+      // NOTE: a plain {} thisArg has no Context.filter, so plain hooks ALSO
+      // fire here — the filter only excludes when thisArg carries a scope.
+      return { globalFired, plainFired, note: 'filter only applies when thisArg has Context.filter' }
     })
 
     // === summary (after async persistence checks settle) ===
