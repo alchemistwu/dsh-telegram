@@ -59,9 +59,15 @@ test('autoTitle truncates long hints and collapses whitespace', () => {
   assert.equal(title, 'TG 09-01 09:05 a very long message that')
 })
 
-test('rule 4: subagent-origin and forked sessions are not conversations', () => {
+test('rule 4: subagent sessions are not conversations, web forks ARE', () => {
+  // origin 'subagent' or delegationDepth > 0 → hidden (delegated tool runs)
   assert.equal(isConversationSession({ origin: 'subagent' }), false)
-  assert.equal(isConversationSession({ parentSession: 'session-x' }), false)
+  assert.equal(isConversationSession({ delegationDepth: 1 }), false)
+  // web "continue in new session" forks: parentSession + seedLength,
+  // delegationDepth 0, no origin — the web sidebar shows them as normal
+  // conversations, so /sessions must too (2026-09-01 incident: user's live
+  // session was invisible)
+  assert.equal(isConversationSession({ parentSession: 'session-x', delegationDepth: 0 }), true)
   assert.equal(isConversationSession({}), true)
 })
 

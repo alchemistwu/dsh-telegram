@@ -101,6 +101,13 @@ export async function createSession(
 }
 
 /** Rule 4: filter a raw session roster down to conversation entries. */
-export function isConversationSession(detail: { origin?: string; parentSession?: string }): boolean {
-  return detail.origin !== 'subagent' && detail.parentSession === undefined
+export function isConversationSession(detail: { origin?: string; parentSession?: string; delegationDepth?: number }): boolean {
+  // origin 'subagent' marks delegated tool sessions. parentSession ALONE is
+  // not disqualifying: web "continue in new session" forks carry
+  // parentSession + seedLength with delegationDepth 0 and no origin, and the
+  // web sidebar shows them as normal conversations (2026-09-01: the user's
+  // current session 'work' was invisible in /sessions because of this).
+  if (detail.origin === 'subagent') return false
+  if ((detail.delegationDepth ?? 0) > 0) return false
+  return true
 }

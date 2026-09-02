@@ -164,8 +164,10 @@ export function apply(ctx: any, config?: Config) {
         const live = svc.sessions
         const titles = svc.sessionTitle
         // Numbered for phone typing: /use 2 selects row 2 of this listing.
-        const convos: any[] = headers.filter((h: any) =>
-          isConversationSession({ origin: h.origin, parentSession: h.parentSession }))
+        const convos: any[] = headers
+          .filter((h: any) =>
+            isConversationSession({ origin: h.origin, parentSession: h.parentSession, delegationDepth: h.delegationDepth }))
+          .sort((a: any, b: any) => (b.createdAt ?? 0) - (a.createdAt ?? 0))   // newest first
         sessionMenu.set(chatId, convos.slice(0, 15).map((h: any) => String(h.id)))
         const rows: string[] = []
         let n = 0
@@ -203,7 +205,7 @@ export function apply(ctx: any, config?: Config) {
         if (!id) {
           const headers = await svc.sessionPersistence?.list?.() ?? []
           const convos = headers.filter((h: any) =>
-            isConversationSession({ origin: h.origin, parentSession: h.parentSession }))
+            isConversationSession({ origin: h.origin, parentSession: h.parentSession, delegationDepth: h.delegationDepth }))
           const byPrefix = convos.find((h: any) => String(h.id).startsWith(query))
           if (byPrefix) {
             id = String(byPrefix.id)
