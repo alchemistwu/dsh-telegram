@@ -17,5 +17,15 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "cordis",
+    "telegram"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alchemistwu/dsh-telegram.git"
+  }
 }
