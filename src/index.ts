@@ -143,33 +143,65 @@ export function apply(ctx: any, config?: Config) {
         return true
       }
       case '/sessions': {
-        // Verified shapes (dsh-alpha2): sessions.list() → Session[] with
-        // .header.{cwd,origin,parentSession}; titles live in sessionTitle
-        // service: sessionTitle.get(session)?.title. Session has NO .title.
+        // Verified via runtime probe (2026-08-31): sessions.list() returns
+        // only LIVE sessions (in-memory store) — telegram sessions from
+        // previous boots don't appear until resumed. The complete durable
+        // source is sessionPersistence.list() → SessionHeader[].
+        // Titles of NON-live sessions can't come from sessionTitle.get()
+        // (folds the live log), so read title events from persistence
+        // inspection. Live sessions still prefer sessionTitle.
         const svc = services()
-        const list = svc.sessions?.list?.() ?? []
+        const headers = await svc.sessionPersistence?.list?.() ?? []
+        const live = svc.sessions
         const titles = svc.sessionTitle
-        const rows = list
-          .filter((s: any) => isConversationSession({ origin: s.header?.origin, parentSession: s.header?.parentSession }))
-          .slice(0, 15)
-          .map((s: any) => {
-            const bound = bridge.agentFor(chatId) === String(s.id) ? '▸' : '•'
-            const title = titles?.get?.(s)?.title
-              ?? s.header?.cwd?.split('/').pop()
-              ?? String(s.id).slice(0, 18)
-            return `${bound} ${title}  (${String(s.id).slice(0, 13)}…)`
-          })
-        await transport.send(chatId, rows.length ? rows.join('\n') : '(no live sessions)')
+        const rows: string[] = []
+        for (const h of headers) {
+          if (!isConversationSession({ origin: h.origin, parentSession: h.parentSession })) continue
+          const id = String(h.id)
+          const bound = bridge.agentFor(chatId) === id ? '▸' : '•'
+          let title: string | undefined
+          const liveSession = live?.get?.(h.id)
+          if (liveSession) {
+            title = titles?.get?.(liveSession)?.title
+          } else {
+            title = await persistedTitle(svc, h.id)
+          }
+          const fallback = h.cwd?.split('/').pop() ?? id.slice(0, 18)
+          rows.push(`${bound} ${title ?? fallback}  (${id.slice(0, 13)}…)`)
+          if (rows.length >= 15) break
+        }
+        await transport.send(chatId, rows.length ? rows.join('\n') : '(no sessions)')
         return true
       }
       case '/use': {
         const prefix = rest[0]
         if (!prefix) { await transport.send(chatId, 'usage: /use <session-id-prefix>'); return true }
-        const list = ctx.get?.('sessions')?.list?.() ?? []
-        const match = list.find((s: any) => String(s.id).startsWith(prefix))
+        // Match against persisted history, not only live sessions.
+        const svc = services()
+        const headers = await svc.sessionPersistence?.list?.() ?? []
+        const match = headers.find((h: any) =>
+          String(h.id).startsWith(prefix) &&
+          isConversationSession({ origin: h.origin, parentSession: h.parentSession }))
         if (!match) { await transport.send(chatId, `no session matches "${prefix}"`); return true }
-        bridge.bind(chatId, String(match.id))
-        await transport.send(chatId, `🔀 Using session ${String(match.id).slice(0, 18)}…`)
+        const id = String(match.id)
+        // Live already? bind directly. Otherwise resume through the registry
+        // (verified: agents.resume(ownerCtx, { resumeSessionId, agentOptions,
+        // setup }) — preset must mount in setup, same as create).
+        if (!ctx.agents?.get?.(id)) {
+          await ctx.agents.resume(ctx, {
+            resumeSessionId: id,
+            agentOptions: cfg.model ? { model: cfg.model } : undefined,
+            setup: (agentCtx: any, commit: any) => {
+              const presets = ctx.get?.('agentPresets')
+              const presetId = presets?.defaultId?.()
+              const preset = presetId ? presets.resolve?.(presetId) : undefined
+              if (preset) presets.mount?.(agentCtx, preset)
+              commit?.()
+            },
+          })
+        }
+        bridge.bind(chatId, id)
+        await transport.send(chatId, `🔀 Using session ${id.slice(0, 18)}…`)
         return true
       }
       case '/status': {
@@ -227,5 +259,23 @@ function readTokenFile(): string | undefined {
     const p = join(new URL('..', import.meta.url).pathname, '.telegram-token')
     if (existsSync(p)) return readFileSync(p, 'utf8').trim()
   } catch { /* fall through */ }
+  return undefined
+}
+
+/**
+ * Title of a persisted, non-live session: last 'session/title' event in the
+ * stored log (verified event type: session-title/src/index.ts:76, data shape
+ * SessionTitleEventData { title, messageSeqs, source }). Returns undefined on
+ * any failure — callers fall back to cwd basename.
+ */
+async function persistedTitle(svc: any, sessionId: string): Promise<string | undefined> {
+  try {
+    const insp = await svc.sessionPersistence?.inspect?.(sessionId)
+    const events = insp?.events ?? []
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]
+      if (e?.type === 'session/title' && typeof e.data?.title === 'string') return e.data.title
+    }
+  } catch { /* non-fatal */ }
   return undefined
 }
