@@ -114,9 +114,9 @@ function makeCtx(overrides: {
         rename: (s: any, title: string) => { if (s) s._title = title },
       },
       agentPresets: {
-        defaultId: () => 'standard',
-        resolve: () => ({ id: 'standard' }),
-        mount: () => {},
+        defaultId: 'standard',                    // PROPERTY (verified source)
+        resolve: async (id?: string) => ({ id: id ?? 'standard' }),
+        mount: async (_ctx: any, _id?: string) => ({ id: _id ?? 'standard' }),  // (agentCtx, id)
       },
       workspaceRegistry: {
         list: () => [],

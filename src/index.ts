@@ -107,7 +107,11 @@ export function apply(ctx: any, config?: Config) {
     (agentId) => bridge.chatFor(agentId),
     (msg, ...rest) => logger.info(msg, ...rest),
   )
-  const detachQuestions = ctx.on('user-questions/request', answerer.tryAnswer)
+  // { global: true } is REQUIRED: the user-questions service dispatches
+  // agent-scoped waterfalls (scopeTarget(agent, agent), user-questions/
+  // index.ts:137); cordis dispatch skips non-global hooks on scoped calls
+  // (vendor/cordis events.ts:173). Without this our answerer never fires.
+  const detachQuestions = ctx.on('user-questions/request', answerer.tryAnswer, { global: true })
 
   // --- commands ---
   async function ensureSession(chatId: number, titleHint?: string): Promise<string> {
@@ -214,11 +218,16 @@ export function apply(ctx: any, config?: Config) {
           await ctx.agents.resume({
             resumeSessionId: id,
             agentOptions: cfg.model ? { model: cfg.model } : undefined,
-            setup: (agentCtx: any, commit: any) => {
+            setup: async (agentCtx: any, commit: any) => {
+              // Verified (preset/agent-presets/src/index.ts): defaultId is a
+              // PROPERTY; mount(agentCtx, id) takes the preset ID, not the
+              // resolved object. resolve(id?) defaults to the default preset.
               const presets = ctx.get?.('agentPresets')
-              const presetId = presets?.defaultId?.()
-              const preset = presetId ? presets.resolve?.(presetId) : undefined
-              if (preset) presets.mount?.(agentCtx, preset)
+              if (presets?.mount) {
+                const presetId = presets.defaultId ?? 'standard'
+                await presets.resolve?.(presetId)   // surface resolution errors
+                await presets.mount(agentCtx, presetId)
+              }
               commit?.()
             },
           })
